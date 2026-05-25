@@ -9,7 +9,14 @@
       "Bash(curl -s -X POST http://localhost:3000/api/signup -H 'Content-Type: application/json' -d '{\"username\":\"testuser\",\"password\":\"test123\",\"name\":\"테스트\"}')",
       "Bash(curl -s -X POST http://localhost:3000/api/login -H 'Content-Type: application/json' -d '{\"username\":\"testuser\",\"password\":\"wrongpass\"}')",
       "Bash(curl -s -o /dev/null -w \"%{http_code} %{redirect_url}\" http://localhost:3000/budget)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/api/admin/users)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/api/admin/users)",
+      "Bash(npm audit *)",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const j=JSON.parse\\(d\\); Object.values\\(j.vulnerabilities||{}\\).forEach\\(v=>console.log\\(v.name, v.severity, v.via\\)\\)\")",
+      "Bash(npm uninstall *)",
+      "Bash(curl -s http://localhost:3000/budget)",
+      "Bash(curl -s -L http://localhost:3000/budget -c /tmp/cookies.txt)",
+      "Bash(grep -v \"^--$\")",
+      "Bash(git add *)"
     ]
   }
 }

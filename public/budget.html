@@ -224,6 +224,23 @@ input.inline-edit { border: 1.5px solid var(--blue2); border-radius: 6px; paddin
 .empty-state { text-align: center; padding: 36px 20px; color: var(--gray); }
 .empty-state .emoji { font-size: 40px; margin-bottom: 10px; }
 .empty-state p { font-size: 14px; }
+
+/* ── 신용카드 가져오기 ── */
+.cc-drop-zone {
+  border: 2px dashed var(--border); border-radius: 10px;
+  padding: 18px 20px; cursor: pointer; text-align: center;
+  transition: all .2s; background: var(--gray-light);
+  flex: 1; min-width: 200px;
+}
+.cc-drop-zone:hover, .cc-drop-zone.dragover { border-color: var(--blue2); background: var(--blue-light); }
+.cc-preview-wrap { max-height: 420px; overflow-y: auto; }
+.cc-cat-sel {
+  height: 30px; padding: 0 8px; border: 1.5px solid var(--border);
+  border-radius: 6px; font-size: 12px; background: white; cursor: pointer;
+  outline: none;
+}
+.cc-cat-sel:focus { border-color: var(--blue2); }
+.cc-row-disabled td { opacity: .45; }
 </style>
 </head>
 <body>
@@ -372,6 +389,72 @@ input.inline-edit { border: 1.5px solid var(--blue2); border-radius: 6px; paddin
         </div>
       </div>
       <button class="btn btn-primary" onclick="addTransaction()">➕ 거래 추가</button>
+    </div>
+  </div>
+
+  <!-- 신용카드 내역 가져오기 -->
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-header orange">💳 신용카드 내역 가져오기</div>
+    <div class="card-body">
+
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;">
+        <div class="form-group" style="margin:0;flex:0 0 auto;">
+          <label>카드 본인</label>
+          <select id="cc-owner" style="width:110px;">
+            <option value="재이">재이</option>
+            <option value="성천">성천</option>
+          </select>
+        </div>
+        <div style="flex:1;">
+          <label style="display:block;font-size:11px;color:var(--gray);margin-bottom:5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;">엑셀 파일 (.xlsx)</label>
+          <div class="cc-drop-zone" id="cc-drop-zone"
+               onclick="document.getElementById('cc-file-input').click()"
+               ondragover="event.preventDefault();this.classList.add('dragover')"
+               ondragleave="this.classList.remove('dragover')"
+               ondrop="handleCCDrop(event)">
+            <div style="font-size:26px;margin-bottom:4px;">📂</div>
+            <div style="font-size:13px;color:var(--gray);">클릭하거나 파일을 드래그하세요</div>
+            <div style="font-size:11px;color:#9CA3AF;margin-top:2px;">.xlsx 파일만 가능</div>
+          </div>
+          <input type="file" id="cc-file-input" accept=".xlsx,.xls" style="display:none;" onchange="parseCCFile(this.files[0])">
+        </div>
+      </div>
+
+      <!-- 프리뷰 -->
+      <div id="cc-preview" style="display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+          <div style="font-weight:700;font-size:14px;color:#374151;" id="cc-preview-title"></div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label style="font-size:12px;color:var(--gray);font-weight:600;">전체 카테고리:</label>
+            <select id="cc-bulk-cat" class="cc-cat-sel" style="width:120px;">
+              <option>식비</option><option>교통</option><option>주거/관리비</option>
+              <option>의료/건강</option><option>교육</option><option>여가/문화</option>
+              <option>쇼핑/의류</option><option>통신</option><option>저축/보험</option>
+              <option selected>기타지출</option>
+            </select>
+            <button onclick="applyCCBulkCat()" style="background:var(--blue-light);color:var(--blue);border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">일괄 적용</button>
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--gray);cursor:pointer;">
+              <input type="checkbox" id="cc-select-all" onchange="toggleAllCC(this.checked)" style="width:15px;height:15px;"> 전체 선택
+            </label>
+          </div>
+        </div>
+        <div class="cc-preview-wrap table-wrap">
+          <table id="cc-preview-table">
+            <thead><tr>
+              <th style="width:36px;">
+                <input type="checkbox" id="cc-th-all" onchange="toggleAllCC(this.checked)" style="width:15px;height:15px;">
+              </th>
+              <th>날짜</th><th>가맹점명</th><th>금액</th><th>구성원</th><th>카테고리</th><th>메모</th>
+            </tr></thead>
+            <tbody id="cc-preview-tbody"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:10px;">
+          <button onclick="cancelCCImport()" style="background:var(--gray-light);color:#374151;border:none;border-radius:10px;padding:11px 20px;font-size:13px;font-weight:600;cursor:pointer;">취소</button>
+          <button onclick="confirmCCImport()" class="btn btn-primary">✅ 선택 항목 가져오기</button>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -1117,6 +1200,185 @@ function doExcelExport(txs) {
 
   XLSX.writeFile(wb, `가계부_${currentYear}년${currentMonth}월.xlsx`);
   showToast('✅ 엑셀 파일이 다운로드됐어요!');
+}
+
+// ════════════════════════════════════════
+// 신용카드 내역 가져오기
+// ════════════════════════════════════════
+let ccRecords = [];
+
+function handleCCDrop(e) {
+  e.preventDefault();
+  document.getElementById('cc-drop-zone').classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file) parseCCFile(file);
+}
+
+function parseCCExcelDate(val) {
+  if (!val && val !== 0) return '';
+  if (val instanceof Date) return val.toISOString().slice(0, 10);
+  if (typeof val === 'number') {
+    // Excel serial date (UTC 기준 변환)
+    const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+    return d.toISOString().slice(0, 10);
+  }
+  const s = String(val).replace(/[^0-9]/g, '');
+  if (s.length === 8) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+  if (s.length === 6) return `20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`;
+  return '';
+}
+
+function doParseCCFile(file) {
+  const dropZone = document.getElementById('cc-drop-zone');
+  const owner = document.getElementById('cc-owner').value;
+  const other = owner === '재이' ? '성천' : '재이';
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const sheetName = wb.SheetNames.find(n => n.includes('국내이용내역')) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+      ccRecords = rows
+        .filter(r => !String(r['취소여부'] || '').trim().includes('취소'))
+        .map(r => {
+          const dateStr   = parseCCExcelDate(r['승인일자']);
+          const memberRaw = String(r['본인가족구분'] || '').trim();
+          const amount    = parseInt(String(r['승인금액(원)'] || r['승인금액'] || '0').replace(/[^0-9]/g, '')) || 0;
+          const detail    = String(r['가맹점명'] || '').trim();
+          const instType  = String(r['일시불할부구분'] || '').trim();
+          const months    = String(r['할부개월'] || '').trim();
+          const member    = (memberRaw === '본인' || memberRaw === '') ? owner : other;
+          let memo = '';
+          if (instType && instType !== '일시불' && months && months !== '0') {
+            memo = `할부 ${months}개월`;
+          }
+          return { dateStr, memberRaw, member, amount, detail, memo, cat: '기타지출', checked: true };
+        })
+        .filter(r => r.dateStr && r.amount > 0)
+        .sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+
+      if (!ccRecords.length) {
+        showToast('ℹ️ 가져올 내역이 없어요 (취소 건 또는 빈 금액 제외)');
+        resetCCDropZone();
+        return;
+      }
+
+      document.getElementById('cc-preview-title').textContent =
+        `📋 ${file.name} — 총 ${ccRecords.length}건`;
+      dropZone.innerHTML = `<div style="font-size:13px;color:var(--green);font-weight:600;">✅ ${file.name}</div>`;
+      document.getElementById('cc-select-all').checked = true;
+      document.getElementById('cc-th-all').checked = true;
+      renderCCPreview();
+      document.getElementById('cc-preview').style.display = 'block';
+    } catch (err) {
+      console.error(err);
+      showToast('⚠️ 파일 파싱 오류: ' + err.message);
+      resetCCDropZone();
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function parseCCFile(file) {
+  if (!file) return;
+  if (!file.name.match(/\.xlsx?$/i)) { showToast('⚠️ .xlsx 파일만 가능합니다'); return; }
+  document.getElementById('cc-drop-zone').innerHTML =
+    '<div style="font-size:13px;color:var(--blue);">⏳ 파일 분석 중...</div>';
+
+  if (typeof XLSX !== 'undefined') {
+    doParseCCFile(file);
+  } else {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload  = () => doParseCCFile(file);
+    s.onerror = () => { showToast('⚠️ XLSX 라이브러리 로드 실패'); resetCCDropZone(); };
+    document.head.appendChild(s);
+  }
+}
+
+function resetCCDropZone() {
+  document.getElementById('cc-drop-zone').innerHTML = `
+    <div style="font-size:26px;margin-bottom:4px;">📂</div>
+    <div style="font-size:13px;color:var(--gray);">클릭하거나 파일을 드래그하세요</div>
+    <div style="font-size:11px;color:#9CA3AF;margin-top:2px;">.xlsx 파일만 가능</div>`;
+  document.getElementById('cc-file-input').value = '';
+}
+
+function renderCCPreview() {
+  const cats = ["식비","교통","주거/관리비","의료/건강","교육","여가/문화",
+                "쇼핑/의류","통신","저축/보험","기타지출"];
+  document.getElementById('cc-preview-tbody').innerHTML = ccRecords.map((r, i) => `
+    <tr class="${r.checked?'':' cc-row-disabled'} ${r.member==='재이'?'personal':r.member==='성천'?'spouse':''}">
+      <td class="center">
+        <input type="checkbox" ${r.checked?'checked':''} onchange="ccToggle(${i},this.checked)" style="width:15px;height:15px;">
+      </td>
+      <td class="center" style="white-space:nowrap;">${r.dateStr}</td>
+      <td>${r.detail}</td>
+      <td class="num" style="font-weight:700;color:var(--red);">${r.amount.toLocaleString('ko-KR')}</td>
+      <td class="center">
+        <span class="badge ${r.member}">${r.member}</span><br>
+        <small style="color:var(--gray);font-size:10px;">${r.memberRaw||'본인'}</small>
+      </td>
+      <td class="center">
+        <select class="cc-cat-sel" onchange="ccSetCat(${i},this.value)">
+          ${cats.map(c=>`<option${c===r.cat?' selected':''}>${c}</option>`).join('')}
+        </select>
+      </td>
+      <td style="font-size:12px;color:var(--gray);">${r.memo||''}</td>
+    </tr>`).join('');
+}
+
+function ccToggle(i, checked) {
+  ccRecords[i].checked = checked;
+  const allOn = ccRecords.every(r => r.checked);
+  document.getElementById('cc-select-all').checked = allOn;
+  document.getElementById('cc-th-all').checked = allOn;
+  renderCCPreview();
+}
+
+function ccSetCat(i, cat) { ccRecords[i].cat = cat; }
+
+function toggleAllCC(checked) {
+  ccRecords.forEach(r => r.checked = checked);
+  document.getElementById('cc-select-all').checked = checked;
+  document.getElementById('cc-th-all').checked = checked;
+  renderCCPreview();
+}
+
+function applyCCBulkCat() {
+  const cat = document.getElementById('cc-bulk-cat').value;
+  ccRecords.forEach(r => r.cat = cat);
+  renderCCPreview();
+}
+
+function cancelCCImport() {
+  ccRecords = [];
+  document.getElementById('cc-preview').style.display = 'none';
+  resetCCDropZone();
+}
+
+async function confirmCCImport() {
+  const toImport = ccRecords.filter(r => r.checked);
+  if (!toImport.length) { showToast('⚠️ 선택된 항목이 없어요'); return; }
+
+  const btn = document.querySelector('[onclick="confirmCCImport()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 저장 중...'; }
+
+  let ok = 0;
+  for (const r of toImport) {
+    const res = await apiSaveTx({
+      date: r.dateStr, type: '지출', member: r.member, cat: r.cat,
+      amount: r.amount, detail: r.detail, method: '신용카드', memo: r.memo || ''
+    });
+    if (res.success) { txData.push(res.tx); ok++; }
+  }
+
+  showToast(`✅ ${ok}건 가져오기 완료!`);
+  cancelCCImport();
+  renderAll();
 }
 
 // ════════════════════════════════════════
