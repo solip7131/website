@@ -9,9 +9,13 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 
 // ── PostgreSQL 연결 ──
+// Railway는 내부 URL(DATABASE_URL)과 외부 URL(DATABASE_PUBLIC_URL)을 모두 제공.
+// 내부 DNS(postgres.railway.internal) 해석 실패 시 외부 URL로 폴백.
+const DB_URL = process.env.DATABASE_URL || process.env.DATABASE_PUBLIC_URL;
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+  connectionString: DB_URL,
+  ssl: DB_URL ? { rejectUnauthorized: false } : false
 });
 
 // ── 기본 고정지출 데이터 ──
@@ -421,20 +425,29 @@ app.use((err, req, res, next) => {
 // ─────────────────────────────────────────
 // 서버 시작
 // ─────────────────────────────────────────
-if (!process.env.DATABASE_URL) {
-  console.error('❌ DATABASE_URL 환경변수가 설정되지 않았습니다.');
+if (!DB_URL) {
+  console.error('❌ DATABASE_URL 또는 DATABASE_PUBLIC_URL 환경변수가 필요합니다.');
   console.error('   Railway: 프로젝트에 PostgreSQL 플러그인을 추가하면 자동 설정됩니다.');
   console.error('   로컬:    DATABASE_URL=postgresql://user:pw@localhost/dbname node server.js');
   process.exit(1);
 }
 
-initDB()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`\n🏠 가계부 서버 실행 중: http://localhost:${PORT}\n`);
-    });
-  })
-  .catch(err => {
-    console.error('❌ DB 초기화 실패:', err.message);
-    process.exit(1);
-  });
+// DB가 아직 준비되지 않았을 수 있으므로 최대 5회 재시도
+async function startWithRetry(retries = 5, delay = 3000) {
+  for (let i = 1; i <= retries; i++) {
+    try {
+      await initDB();
+      app.listen(PORT, () => {
+        console.log(`\n🏠 가계부 서버 실행 중: http://localhost:${PORT}\n`);
+      });
+      return;
+    } catch (err) {
+      console.error(`❌ DB 연결 실패 (${i}/${retries}): ${err.message}`);
+      if (i === retries) { process.exit(1); }
+      console.log(`   ${delay / 1000}초 후 재시도...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
+startWithRetry();
