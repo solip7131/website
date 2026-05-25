@@ -16,7 +16,11 @@
       "Bash(curl -s http://localhost:3000/budget)",
       "Bash(curl -s -L http://localhost:3000/budget -c /tmp/cookies.txt)",
       "Bash(grep -v \"^--$\")",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(sudo npm install pg connect-pg-simple)",
+      "Bash(node *)"
     ]
   }
 }

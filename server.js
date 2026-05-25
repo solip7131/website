@@ -1,63 +1,20 @@
-const express = require('express');
-const session = require('express-session');
-const bcrypt  = require('bcryptjs');
-const fs      = require('fs');
-const path    = require('path');
+const express    = require('express');
+const session    = require('express-session');
+const bcrypt     = require('bcryptjs');
+const { Pool }   = require('pg');
+const PgSession  = require('connect-pg-simple')(session);
+const path       = require('path');
 
-const app         = express();
-const DB_FILE     = path.join(__dirname, 'users.json');
-const BUDGET_FILE = path.join(__dirname, 'budget_data.json');
+const app  = express();
+const PORT = process.env.PORT || 3000;
 
-// ── JSON 파일 DB (users) ──
-function readDB() {
-  if (!fs.existsSync(DB_FILE)) return { users: [], nextId: 1 };
-  return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-}
-function writeDB(data) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-}
+// ── PostgreSQL 연결 ──
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
 
-const db = {
-  findOne: (pred)   => readDB().users.find(pred) || null,
-  findAll: (pred)   => { const d = readDB(); return pred ? d.users.filter(pred) : d.users; },
-  insert: (user) => {
-    const d = readDB();
-    user.id = d.nextId++;
-    user.created_at = new Date().toISOString();
-    d.users.push(user);
-    writeDB(d);
-    return user;
-  },
-  update: (id, patch) => {
-    const d = readDB();
-    const i = d.users.findIndex(u => u.id === id);
-    if (i === -1) return false;
-    d.users[i] = { ...d.users[i], ...patch };
-    writeDB(d);
-    return true;
-  },
-  delete: (id) => {
-    const d = readDB();
-    const before = d.users.length;
-    d.users = d.users.filter(u => u.id !== id);
-    if (d.users.length !== before) { writeDB(d); return true; }
-    return false;
-  }
-};
-
-// ── 최초 실행 시 admin 계정 생성 ──
-if (!db.findOne(u => u.username === 'admin')) {
-  db.insert({
-    username: 'admin',
-    password: bcrypt.hashSync('admin1234', 10),
-    name: '관리자',
-    role: 'admin',
-    status: 'approved'
-  });
-  console.log('✅ 관리자 계정 생성됨  |  ID: admin  /  PW: admin1234');
-}
-
-// ── 가계부 데이터 ──
+// ── 기본 고정지출 데이터 ──
 const DEFAULT_FIXED = [
   ["월세",             "주거/관리비","재이",   990000,"계좌이체",   "10일",""],
   ["코웨이 침대",      "주거/관리비","재이",   111999,"신용카드",   "10일","카드자동"],
@@ -92,86 +49,163 @@ const DEFAULT_FIXED = [
   ["소상공",           "기타지출",   "성천",   242000,"계좌이체",   "","대출상환"],
 ];
 
-function readBudget() {
-  if (!fs.existsSync(BUDGET_FILE)) {
-    const data = {
-      transactions: [],
-      fixed: DEFAULT_FIXED.map(([name, cat, member, amt, method, day, note]) => ({
-        name, cat, member, amounts: Array(12).fill(amt), method, day, note
-      }))
-    };
-    writeBudget(data);
-    return data;
+// ─────────────────────────────────────────
+// DB 초기화: 테이블 생성 + 기본 데이터 시드
+// ─────────────────────────────────────────
+async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id         SERIAL PRIMARY KEY,
+      username   TEXT UNIQUE NOT NULL,
+      password   TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      role       TEXT NOT NULL DEFAULT 'user',
+      status     TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS transactions (
+      id         TEXT PRIMARY KEY,
+      date       TEXT NOT NULL,
+      type       TEXT,
+      member     TEXT,
+      cat        TEXT,
+      amount     INTEGER DEFAULT 0,
+      detail     TEXT DEFAULT '',
+      method     TEXT DEFAULT '',
+      memo       TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fixed_items (
+      order_index INTEGER NOT NULL,
+      name        TEXT NOT NULL,
+      cat         TEXT,
+      member      TEXT,
+      amounts     JSONB NOT NULL DEFAULT '[]',
+      method      TEXT DEFAULT '',
+      day         TEXT DEFAULT '',
+      note        TEXT DEFAULT ''
+    )
+  `);
+
+  // admin 계정이 없으면 생성
+  const { rows: adminRows } = await pool.query(
+    "SELECT id FROM users WHERE username = 'admin' LIMIT 1"
+  );
+  if (adminRows.length === 0) {
+    const hash = await bcrypt.hash('admin1234', 10);
+    await pool.query(
+      'INSERT INTO users (username, password, name, role, status) VALUES ($1,$2,$3,$4,$5)',
+      ['admin', hash, '관리자', 'admin', 'approved']
+    );
+    console.log('✅ 관리자 계정 생성됨  |  ID: admin  /  PW: admin1234');
   }
-  return JSON.parse(fs.readFileSync(BUDGET_FILE, 'utf8'));
+
+  // 고정지출 기본 데이터가 없으면 시드
+  const { rows: cntRows } = await pool.query('SELECT COUNT(*) AS cnt FROM fixed_items');
+  if (parseInt(cntRows[0].cnt) === 0) {
+    for (let i = 0; i < DEFAULT_FIXED.length; i++) {
+      const [name, cat, member, amt, method, day, note] = DEFAULT_FIXED[i];
+      await pool.query(
+        `INSERT INTO fixed_items (order_index,name,cat,member,amounts,method,day,note)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [i, name, cat, member, JSON.stringify(Array(12).fill(amt)), method, day, note]
+      );
+    }
+    console.log('✅ 고정지출 기본 데이터 생성됨');
+  }
 }
 
-function writeBudget(data) {
-  fs.writeFileSync(BUDGET_FILE, JSON.stringify(data, null, 2));
-}
-
-// ── SSE 브로드캐스트 ──
+// ─────────────────────────────────────────
+// SSE
+// ─────────────────────────────────────────
 const sseClients = new Set();
 
 function broadcastUpdate() {
   const msg = `data: ${JSON.stringify({ type: 'update', ts: Date.now() })}\n\n`;
   for (const client of [...sseClients]) {
-    try { client.write(msg); } catch (e) { sseClients.delete(client); }
+    try { client.write(msg); } catch { sseClients.delete(client); }
   }
 }
 
-// ── 미들웨어 ──
+// ─────────────────────────────────────────
+// 미들웨어
+// ─────────────────────────────────────────
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  secret: 'budget-secret-key-2024',
+  store: new PgSession({ pool, tableName: 'session', createTableIfMissing: true }),
+  secret: process.env.SESSION_SECRET || 'budget-secret-key-2024',
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 24 * 60 * 60 * 1000 }
 }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── Auth 미들웨어 ──
+// ─────────────────────────────────────────
+// Auth 헬퍼
+// ─────────────────────────────────────────
+async function getUser(id) {
+  if (!id) return null;
+  const { rows } = await pool.query('SELECT * FROM users WHERE id = $1 LIMIT 1', [id]);
+  return rows[0] || null;
+}
+
 function requireLogin(req, res, next) {
   if (!req.session.userId) return res.redirect('/login');
   next();
 }
 
-function requireApproved(req, res, next) {
-  if (!req.session.userId) return res.status(401).json({ error: 'unauthorized' });
-  const user = db.findOne(u => u.id === req.session.userId);
-  if (!user) { req.session.destroy(); return res.status(401).json({ error: 'unauthorized' }); }
-  if (user.status === 'pending')  return res.status(403).json({ error: 'pending' });
-  if (user.status === 'rejected') return res.status(403).json({ error: 'rejected' });
-  if (user.role === 'admin' || user.status === 'approved') return next();
-  return res.status(401).json({ error: 'unauthorized' });
+async function requireApproved(req, res, next) {
+  try {
+    if (!req.session.userId) return res.status(401).json({ error: 'unauthorized' });
+    const user = await getUser(req.session.userId);
+    if (!user) { req.session.destroy(() => {}); return res.status(401).json({ error: 'unauthorized' }); }
+    if (user.status === 'pending')  return res.status(403).json({ error: 'pending' });
+    if (user.status === 'rejected') return res.status(403).json({ error: 'rejected' });
+    if (user.role === 'admin' || user.status === 'approved') return next();
+    return res.status(401).json({ error: 'unauthorized' });
+  } catch (err) { next(err); }
 }
 
-function requireApprovedPage(req, res, next) {
-  if (!req.session.userId) return res.redirect('/login');
-  const user = db.findOne(u => u.id === req.session.userId);
-  if (!user) { req.session.destroy(); return res.redirect('/login'); }
-  if (user.status === 'pending')  return res.redirect('/pending');
-  if (user.status === 'rejected') return res.redirect('/rejected');
-  if (user.role === 'admin' || user.status === 'approved') return next();
-  return res.redirect('/login');
+async function requireApprovedPage(req, res, next) {
+  try {
+    if (!req.session.userId) return res.redirect('/login');
+    const user = await getUser(req.session.userId);
+    if (!user) { req.session.destroy(() => {}); return res.redirect('/login'); }
+    if (user.status === 'pending')  return res.redirect('/pending');
+    if (user.status === 'rejected') return res.redirect('/rejected');
+    if (user.role === 'admin' || user.status === 'approved') return next();
+    return res.redirect('/login');
+  } catch (err) { next(err); }
 }
 
-function requireAdmin(req, res, next) {
-  if (!req.session.userId) return res.redirect('/login');
-  const user = db.findOne(u => u.id === req.session.userId);
-  if (!user || user.role !== 'admin') return res.status(403).redirect('/');
-  next();
+async function requireAdmin(req, res, next) {
+  try {
+    if (!req.session.userId) return res.redirect('/login');
+    const user = await getUser(req.session.userId);
+    if (!user || user.role !== 'admin') return res.redirect('/');
+    next();
+  } catch (err) { next(err); }
 }
 
-// ── 페이지 라우트 ──
-app.get('/', requireLogin, (req, res) => {
-  const user = db.findOne(u => u.id === req.session.userId);
-  if (!user) { req.session.destroy(); return res.redirect('/login'); }
-  if (user.role === 'admin')           return res.redirect('/admin');
-  if (user.status === 'approved')      return res.redirect('/budget');
-  if (user.status === 'pending')       return res.redirect('/pending');
-  return res.redirect('/rejected');
+// ─────────────────────────────────────────
+// 페이지 라우트
+// ─────────────────────────────────────────
+app.get('/', requireLogin, async (req, res, next) => {
+  try {
+    const user = await getUser(req.session.userId);
+    if (!user) { req.session.destroy(() => {}); return res.redirect('/login'); }
+    if (user.role === 'admin')      return res.redirect('/admin');
+    if (user.status === 'approved') return res.redirect('/budget');
+    if (user.status === 'pending')  return res.redirect('/pending');
+    return res.redirect('/rejected');
+  } catch (err) { next(err); }
 });
 
 const send = (file) => (req, res) => res.sendFile(path.join(__dirname, 'public', file));
@@ -182,128 +216,187 @@ app.get('/budget',   requireApprovedPage, send('budget.html'));
 app.get('/admin',    requireAdmin,        send('admin.html'));
 app.get('/pending',  requireLogin,        send('pending.html'));
 app.get('/rejected', requireLogin,        send('rejected.html'));
-app.get('/logout',   (req, res) => { req.session.destroy(); res.redirect('/login'); });
+app.get('/logout',   (req, res) => { req.session.destroy(() => {}); res.redirect('/login'); });
 
-// ── Auth API ──
-app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password)
-    return res.json({ success: false, message: '아이디와 비밀번호를 입력해주세요.' });
+// ─────────────────────────────────────────
+// Auth API
+// ─────────────────────────────────────────
+app.post('/api/login', async (req, res, next) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password)
+      return res.json({ success: false, message: '아이디와 비밀번호를 입력해주세요.' });
 
-  const user = db.findOne(u => u.username === username);
-  if (!user || !(await bcrypt.compare(password, user.password)))
-    return res.json({ success: false, message: '아이디 또는 비밀번호가 올바르지 않습니다.' });
+    const { rows } = await pool.query('SELECT * FROM users WHERE username = $1 LIMIT 1', [username]);
+    const user = rows[0];
+    if (!user || !(await bcrypt.compare(password, user.password)))
+      return res.json({ success: false, message: '아이디 또는 비밀번호가 올바르지 않습니다.' });
 
-  req.session.userId = user.id;
-  req.session.role   = user.role;
+    req.session.userId = user.id;
+    req.session.role   = user.role;
 
-  let redirect = '/';
-  if (user.role === 'admin')           redirect = '/admin';
-  else if (user.status === 'approved') redirect = '/budget';
-  else if (user.status === 'pending')  redirect = '/pending';
-  else                                  redirect = '/rejected';
+    let redirect = '/';
+    if (user.role === 'admin')           redirect = '/admin';
+    else if (user.status === 'approved') redirect = '/budget';
+    else if (user.status === 'pending')  redirect = '/pending';
+    else                                  redirect = '/rejected';
 
-  res.json({ success: true, redirect });
+    res.json({ success: true, redirect });
+  } catch (err) { next(err); }
 });
 
-app.post('/api/signup', async (req, res) => {
-  const { username, password, name } = req.body;
-  if (!username || !password || !name)
-    return res.json({ success: false, message: '모든 항목을 입력해주세요.' });
-  if (username.length < 3)
-    return res.json({ success: false, message: '아이디는 3자 이상이어야 합니다.' });
-  if (password.length < 6)
-    return res.json({ success: false, message: '비밀번호는 6자 이상이어야 합니다.' });
-  if (db.findOne(u => u.username === username))
-    return res.json({ success: false, message: '이미 사용 중인 아이디입니다.' });
+app.post('/api/signup', async (req, res, next) => {
+  try {
+    const { username, password, name } = req.body;
+    if (!username || !password || !name)
+      return res.json({ success: false, message: '모든 항목을 입력해주세요.' });
+    if (username.length < 3)
+      return res.json({ success: false, message: '아이디는 3자 이상이어야 합니다.' });
+    if (password.length < 6)
+      return res.json({ success: false, message: '비밀번호는 6자 이상이어야 합니다.' });
 
-  db.insert({
-    username,
-    password: await bcrypt.hash(password, 10),
-    name,
-    role: 'user',
-    status: 'pending'
-  });
-  res.json({ success: true, message: '가입 신청이 완료됐어요! 관리자 승인 후 이용 가능합니다.' });
+    const { rows } = await pool.query('SELECT id FROM users WHERE username = $1 LIMIT 1', [username]);
+    if (rows.length > 0)
+      return res.json({ success: false, message: '이미 사용 중인 아이디입니다.' });
+
+    await pool.query(
+      'INSERT INTO users (username, password, name, role, status) VALUES ($1,$2,$3,$4,$5)',
+      [username, await bcrypt.hash(password, 10), name, 'user', 'pending']
+    );
+    res.json({ success: true, message: '가입 신청이 완료됐어요! 관리자 승인 후 이용 가능합니다.' });
+  } catch (err) { next(err); }
 });
 
-// ── 현재 사용자 정보 ──
-app.get('/api/me', (req, res) => {
-  if (!req.session.userId) return res.json({ loggedIn: false });
-  const user = db.findOne(u => u.id === req.session.userId);
-  if (!user) return res.json({ loggedIn: false });
-  const { password: _, ...safe } = user;
-  res.json({ loggedIn: true, ...safe });
+app.get('/api/me', async (req, res, next) => {
+  try {
+    if (!req.session.userId) return res.json({ loggedIn: false });
+    const user = await getUser(req.session.userId);
+    if (!user) return res.json({ loggedIn: false });
+    const { password: _, ...safe } = user;
+    res.json({ loggedIn: true, ...safe });
+  } catch (err) { next(err); }
 });
 
-// ── 관리자 API ──
-app.get('/api/admin/users', requireAdmin, (req, res) => {
-  const users = db.findAll(u => u.role !== 'admin')
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-    .map(({ password: _, ...u }) => u);
-  res.json(users);
+// ─────────────────────────────────────────
+// 관리자 API
+// ─────────────────────────────────────────
+app.get('/api/admin/users', requireAdmin, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, username, name, role, status, created_at
+       FROM users WHERE role != 'admin' ORDER BY created_at DESC`
+    );
+    res.json(rows);
+  } catch (err) { next(err); }
 });
 
-app.post('/api/admin/users/:id/approve', requireAdmin, (req, res) => {
-  db.update(Number(req.params.id), { status: 'approved' });
-  res.json({ success: true });
+app.post('/api/admin/users/:id/approve', requireAdmin, async (req, res, next) => {
+  try {
+    await pool.query("UPDATE users SET status = 'approved' WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { next(err); }
 });
 
-app.post('/api/admin/users/:id/reject', requireAdmin, (req, res) => {
-  db.update(Number(req.params.id), { status: 'rejected' });
-  res.json({ success: true });
+app.post('/api/admin/users/:id/reject', requireAdmin, async (req, res, next) => {
+  try {
+    await pool.query("UPDATE users SET status = 'rejected' WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { next(err); }
 });
 
-app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
-  db.delete(Number(req.params.id));
-  res.json({ success: true });
+app.delete('/api/admin/users/:id', requireAdmin, async (req, res, next) => {
+  try {
+    await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { next(err); }
 });
 
-// ── 가계부 API ──
-app.get('/api/budget', requireApproved, (req, res) => {
-  res.json(readBudget());
+// ─────────────────────────────────────────
+// 가계부 API
+// ─────────────────────────────────────────
+app.get('/api/budget', requireApproved, async (req, res, next) => {
+  try {
+    const { rows: txRows } = await pool.query(
+      'SELECT id, date, type, member, cat, amount, detail, method, memo FROM transactions ORDER BY date ASC, created_at ASC'
+    );
+    const { rows: fixedRows } = await pool.query(
+      'SELECT name, cat, member, amounts, method, day, note FROM fixed_items ORDER BY order_index ASC'
+    );
+    const fixed = fixedRows.map(f => ({
+      ...f,
+      amounts: Array.isArray(f.amounts) ? f.amounts : JSON.parse(f.amounts)
+    }));
+    fixed.forEach(f => {
+      if (f.member === '본인')    f.member = '재이';
+      if (f.member === '배우자') f.member = '성천';
+    });
+    res.json({ transactions: txRows, fixed });
+  } catch (err) { next(err); }
 });
 
-app.post('/api/transactions', requireApproved, (req, res) => {
-  const { date, type, member, cat, amount, detail, method, memo } = req.body;
-  if (!date || !amount) return res.json({ success: false, message: '날짜와 금액은 필수입니다.' });
-  const budget = readBudget();
-  const tx = {
-    id: Date.now().toString(),
-    date, type, member, cat,
-    amount: Number(amount),
-    detail: detail || '',
-    method: method || '',
-    memo:   memo   || ''
-  };
-  budget.transactions.push(tx);
-  writeBudget(budget);
-  broadcastUpdate();
-  res.json({ success: true, tx });
-});
+app.post('/api/transactions', requireApproved, async (req, res, next) => {
+  try {
+    const { date, type, member, cat, amount, detail, method, memo } = req.body;
+    if (!date || !amount) return res.json({ success: false, message: '날짜와 금액은 필수입니다.' });
 
-app.delete('/api/transactions/:id', requireApproved, (req, res) => {
-  const budget = readBudget();
-  const before = budget.transactions.length;
-  budget.transactions = budget.transactions.filter(t => t.id !== req.params.id);
-  if (budget.transactions.length < before) {
-    writeBudget(budget);
+    const id = Date.now().toString();
+    const tx = {
+      id, date, type, member, cat,
+      amount: Number(amount),
+      detail: detail || '',
+      method: method || '',
+      memo:   memo   || ''
+    };
+    await pool.query(
+      `INSERT INTO transactions (id, date, type, member, cat, amount, detail, method, memo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [id, date, type, member, cat, tx.amount, tx.detail, tx.method, tx.memo]
+    );
     broadcastUpdate();
-  }
-  res.json({ success: true });
+    res.json({ success: true, tx });
+  } catch (err) { next(err); }
 });
 
-app.put('/api/fixed', requireApproved, (req, res) => {
-  const { fixed } = req.body;
-  if (!Array.isArray(fixed)) return res.json({ success: false, message: '잘못된 데이터 형식입니다.' });
-  const budget = readBudget();
-  budget.fixed = fixed;
-  writeBudget(budget);
-  broadcastUpdate();
-  res.json({ success: true });
+app.delete('/api/transactions/:id', requireApproved, async (req, res, next) => {
+  try {
+    await pool.query('DELETE FROM transactions WHERE id = $1', [req.params.id]);
+    broadcastUpdate();
+    res.json({ success: true });
+  } catch (err) { next(err); }
 });
 
-// ── SSE 실시간 업데이트 ──
+app.put('/api/fixed', requireApproved, async (req, res, next) => {
+  try {
+    const { fixed } = req.body;
+    if (!Array.isArray(fixed)) return res.json({ success: false, message: '잘못된 데이터 형식입니다.' });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM fixed_items');
+      for (let i = 0; i < fixed.length; i++) {
+        const f = fixed[i];
+        await client.query(
+          `INSERT INTO fixed_items (order_index,name,cat,member,amounts,method,day,note)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [i, f.name, f.cat, f.member, JSON.stringify(f.amounts), f.method, f.day || '', f.note || '']
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    broadcastUpdate();
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// ─────────────────────────────────────────
+// SSE 실시간 업데이트
+// ─────────────────────────────────────────
 app.get('/api/events', requireApproved, (req, res) => {
   res.writeHead(200, {
     'Content-Type':  'text/event-stream',
@@ -316,7 +409,32 @@ app.get('/api/events', requireApproved, (req, res) => {
   req.on('close', () => sseClients.delete(res));
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`\n🏠 가계부 서버 실행 중: http://localhost:${PORT}\n`);
+// ─────────────────────────────────────────
+// 글로벌 에러 핸들러
+// ─────────────────────────────────────────
+app.use((err, req, res, next) => {
+  console.error('❌ 서버 오류:', err.message);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: 'internal_server_error', message: err.message });
 });
+
+// ─────────────────────────────────────────
+// 서버 시작
+// ─────────────────────────────────────────
+if (!process.env.DATABASE_URL) {
+  console.error('❌ DATABASE_URL 환경변수가 설정되지 않았습니다.');
+  console.error('   Railway: 프로젝트에 PostgreSQL 플러그인을 추가하면 자동 설정됩니다.');
+  console.error('   로컬:    DATABASE_URL=postgresql://user:pw@localhost/dbname node server.js');
+  process.exit(1);
+}
+
+initDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`\n🏠 가계부 서버 실행 중: http://localhost:${PORT}\n`);
+    });
+  })
+  .catch(err => {
+    console.error('❌ DB 초기화 실패:', err.message);
+    process.exit(1);
+  });
