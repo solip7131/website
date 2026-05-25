@@ -544,35 +544,61 @@ const CAT_COLORS = {
 };
 const ALL_CATS = ["식비","교통","주거/관리비","의료/건강","교육","여가/문화","쇼핑/의류","통신","저축/보험","기타지출"];
 
-// ── localStorage 키 (사용자 ID 기반, init()에서 설정) ──
-let KEY_TX, KEY_FIXED;
-function loadFixed() {
-  const raw = localStorage.getItem(KEY_FIXED);
-  if (raw) {
-    const data = JSON.parse(raw);
-    let migrated = false;
-    data.forEach(f => {
-      if (f.member === '본인') { f.member = '재이'; migrated = true; }
-      if (f.member === '배우자') { f.member = '성천'; migrated = true; }
-    });
-    if (migrated) localStorage.setItem(KEY_FIXED, JSON.stringify(data));
-    return data;
-  }
-  return DEFAULT_FIXED.map(([name,cat,member,amt,method,day,note]) => ({
-    name, cat, member, amounts: Array(12).fill(amt), method, day, note
-  }));
-}
-function saveFixed(data) { localStorage.setItem(KEY_FIXED, JSON.stringify(data)); }
+// ── 서버 API 함수 ──
+let lastWriteTime = 0;
 
-function loadTx() {
-  const raw = localStorage.getItem(KEY_TX);
-  return raw ? JSON.parse(raw) : [];
+async function loadData() {
+  const res  = await fetch('/api/budget');
+  const data = await res.json();
+  data.fixed.forEach(f => {
+    if (f.member === '본인')    f.member = '재이';
+    if (f.member === '배우자') f.member = '성천';
+  });
+  fixedData = data.fixed;
+  txData    = data.transactions;
 }
-function saveTx(data) { localStorage.setItem(KEY_TX, JSON.stringify(data)); }
+
+async function apiSaveTx(tx) {
+  lastWriteTime = Date.now();
+  const res = await fetch('/api/transactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(tx)
+  });
+  return res.json();
+}
+
+async function apiDeleteTx(id) {
+  lastWriteTime = Date.now();
+  const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+  return res.json();
+}
+
+async function apiSaveFixed(data) {
+  lastWriteTime = Date.now();
+  const res = await fetch('/api/fixed', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fixed: data })
+  });
+  return res.json();
+}
+
+function setupSSE() {
+  const es = new EventSource('/api/events');
+  es.onmessage = async (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'connected') return;
+    if (Date.now() - lastWriteTime < 1500) return;
+    await loadData();
+    renderAll();
+    showToast('🔄 다른 기기에서 데이터가 업데이트됐어요');
+  };
+}
 
 // ── 상태 ──
-let currentYear = 2026, currentMonth = 5;
-let fixedData, txData;
+let currentYear = 2026, currentMonth = new Date().getMonth() + 1;
+let fixedData = [], txData = [];
 // Chart.js 인스턴스
 let catChartInst = null, monthlyChartInst = null;
 
@@ -784,7 +810,7 @@ function renderTransactions() {
     </tr>`).join('');
 }
 
-function addTransaction() {
+async function addTransaction() {
   const date   = document.getElementById('tx-date').value;
   const type   = document.getElementById('tx-type').value;
   const member = document.getElementById('tx-member').value;
@@ -796,19 +822,20 @@ function addTransaction() {
 
   if (!date || !amount || isNaN(amount) || amount <= 0) { showToast('⚠️ 날짜와 금액은 필수예요!'); return; }
 
-  txData.push({ id: Date.now().toString(), date, type, member, cat, amount, detail, method, memo });
-  saveTx(txData);
+  const result = await apiSaveTx({ date, type, member, cat, amount, detail, method, memo });
+  if (!result.success) { showToast('⚠️ 저장 실패. 다시 시도해주세요.'); return; }
+  txData.push(result.tx);
   ['tx-amount','tx-detail','tx-memo'].forEach(id => document.getElementById(id).value = '');
   showToast('✅ 거래가 추가됐어요!');
   renderAll();
 }
 
-function deleteTx(id) {
+async function deleteTx(id) {
   if (!confirm('이 거래를 삭제할까요?')) return;
   txData = txData.filter(t => t.id !== id);
-  saveTx(txData);
-  showToast('🗑️ 삭제됐어요');
   renderAll();
+  await apiDeleteTx(id);
+  showToast('🗑️ 삭제됐어요');
 }
 
 // ════════════════════════════════════════
@@ -859,7 +886,7 @@ function renderFixed() {
        <td colspan="5"></td></tr>`;
 }
 
-function addFixed() {
+async function addFixed() {
   const name   = document.getElementById('new-fixed-name').value.trim();
   const cat    = document.getElementById('new-fixed-cat').value;
   const member = document.getElementById('new-fixed-member').value;
@@ -869,16 +896,16 @@ function addFixed() {
   const note   = document.getElementById('new-fixed-note').value.trim();
   if (!name) { showToast('⚠️ 항목명을 입력해주세요!'); return; }
   fixedData.push({ name, cat, member, amounts: Array(12).fill(amt), method, day, note });
-  saveFixed(fixedData);
+  await apiSaveFixed(fixedData);
   ['new-fixed-name','new-fixed-amount','new-fixed-day','new-fixed-note'].forEach(id => document.getElementById(id).value = '');
   showToast(`✅ "${name}" 항목이 추가됐어요!`);
   renderAll();
 }
 
-function deleteFixed(idx) {
+async function deleteFixed(idx) {
   if (!confirm(`"${fixedData[idx].name}" 항목을 삭제할까요?`)) return;
   fixedData.splice(idx, 1);
-  saveFixed(fixedData);
+  await apiSaveFixed(fixedData);
   showToast('🗑️ 삭제됐어요');
   renderAll();
 }
@@ -890,9 +917,9 @@ function startEditFixedField(el, idx, field) {
   input.style.width = field === 'note' ? '130px' : '70px';
   input.style.textAlign = 'left';
   el.replaceWith(input); input.focus(); input.select();
-  function commit() {
+  async function commit() {
     fixedData[idx][field] = input.value.trim();
-    saveFixed(fixedData);
+    await apiSaveFixed(fixedData);
     showToast(`✅ ${fixedData[idx].name} ${field==='day'?'납부일':'비고'}이 수정됐어요`);
     renderFixed();
   }
@@ -900,7 +927,7 @@ function startEditFixedField(el, idx, field) {
   input.addEventListener('keydown', e => { if(e.key==='Enter') input.blur(); if(e.key==='Escape'){input.value=cur;input.blur();} });
 }
 
-function moveFixed(gi, dir) {
+async function moveFixed(gi, dir) {
   const member = fixedData[gi].member;
   const sameIdxs = fixedData.map((f,i)=>f.member===member?i:-1).filter(i=>i>=0);
   const pos = sameIdxs.indexOf(gi);
@@ -908,7 +935,7 @@ function moveFixed(gi, dir) {
   if (targetPos < 0 || targetPos >= sameIdxs.length) return;
   const targetGi = sameIdxs[targetPos];
   [fixedData[gi], fixedData[targetGi]] = [fixedData[targetGi], fixedData[gi]];
-  saveFixed(fixedData);
+  await apiSaveFixed(fixedData);
   renderFixed();
 }
 
@@ -925,9 +952,9 @@ function startEditFixedMethod(el, idx) {
   });
   el.replaceWith(select);
   select.focus();
-  function commit() {
+  async function commit() {
     fixedData[idx].method = select.value;
-    saveFixed(fixedData);
+    await apiSaveFixed(fixedData);
     showToast(`✅ ${fixedData[idx].name} 납부방법이 "${select.value}"으로 변경됐어요`);
     renderFixed();
   }
@@ -941,11 +968,11 @@ function startEditFixed(el, idx) {
   const input = document.createElement('input');
   input.className = 'inline-edit'; input.type = 'number'; input.value = cur;
   el.replaceWith(input); input.focus(); input.select();
-  function commit() {
+  async function commit() {
     const val = parseInt(input.value);
     if (!isNaN(val) && val >= 0) {
       fixedData[idx].amounts[m-1] = val;
-      saveFixed(fixedData);
+      await apiSaveFixed(fixedData);
       showToast(`✅ ${fixedData[idx].name} ${m}월 금액이 ${won(val)}으로 변경됐어요`);
     }
     renderFixed(); renderDashboard();
@@ -1103,27 +1130,22 @@ function renderAll() {
   renderSummary();
 }
 
-// ── 초기화 (인증 확인 후 실행) ──
+// ── 초기화 ──
 document.addEventListener('DOMContentLoaded', async () => {
   const res  = await fetch('/api/me');
   const user = await res.json();
   if (!user.loggedIn) { window.location.href = '/login'; return; }
   if (user.status !== 'approved' && user.role !== 'admin') { window.location.href = '/pending'; return; }
 
-  // 사용자별 localStorage 키
-  KEY_TX    = `budget_tx_${user.id}`;
-  KEY_FIXED = `budget_fixed_${user.id}`;
-
-  fixedData = loadFixed();
-  txData    = loadTx();
-
-  // 헤더에 사용자 이름 표시
   const nameEl = document.getElementById('user-name-display');
   if (nameEl) nameEl.textContent = `👤 ${user.name}`;
 
   const today = new Date();
   document.getElementById('tx-date').value = today.toISOString().slice(0, 10);
+
+  await loadData();
   renderAll();
+  setupSSE();
 });
 </script>
 </body>
