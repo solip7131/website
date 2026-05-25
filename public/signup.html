@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>회원가입 - 천재쀼 가계부</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Apple SD Gothic Neo', '맑은 고딕', sans-serif;
+  background: linear-gradient(135deg, #1A3FA8 0%, #2D5BE3 50%, #5A8FE8 100%);
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.card {
+  background: white; border-radius: 20px;
+  padding: 48px 40px; width: 100%; max-width: 420px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+.logo { text-align: center; margin-bottom: 32px; }
+.logo h1 { font-size: 24px; font-weight: 800; color: #1F2937; margin-bottom: 6px; }
+.logo p { font-size: 13px; color: #6B7280; line-height: 1.6; }
+.form-group { margin-bottom: 18px; }
+.form-group label { display: block; font-size: 12px; font-weight: 700; color: #374151; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.5px; }
+.form-group input {
+  width: 100%; padding: 13px 16px; border: 2px solid #E5E7EB;
+  border-radius: 12px; font-size: 14px; outline: none;
+  transition: border 0.2s, box-shadow 0.2s;
+}
+.form-group input:focus { border-color: #3B72D9; box-shadow: 0 0 0 4px rgba(59,114,217,0.12); }
+.hint { font-size: 11px; color: #9CA3AF; margin-top: 5px; }
+.btn {
+  width: 100%; padding: 14px; border: none; border-radius: 12px;
+  background: linear-gradient(135deg, #27AE60, #2ECC71);
+  color: white; font-size: 15px; font-weight: 700;
+  cursor: pointer; transition: all 0.2s; margin-top: 8px;
+}
+.btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(39,174,96,0.4); }
+.btn:active { transform: translateY(0); }
+.divider { text-align: center; margin: 20px 0; color: #9CA3AF; font-size: 13px; position: relative; }
+.divider::before, .divider::after {
+  content: ''; position: absolute; top: 50%; width: 40%; height: 1px;
+  background: #E5E7EB;
+}
+.divider::before { left: 0; }
+.divider::after { right: 0; }
+.link-btn {
+  width: 100%; padding: 13px; border: 2px solid #E5E7EB; border-radius: 12px;
+  background: white; color: #374151; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s;
+}
+.link-btn:hover { border-color: #3B72D9; color: #3B72D9; background: #F0F4FF; }
+.msg-box { padding: 14px 16px; border-radius: 12px; font-size: 13px; margin-bottom: 18px; display: none; }
+.msg-box.error { background: #FFF0F0; border: 1px solid #FFCCCC; color: #E53935; }
+.msg-box.success { background: #F0FFF4; border: 1px solid #BBF7D0; color: #166534; }
+.msg-box.show { display: block; }
+.info-notice {
+  background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 12px;
+  padding: 14px 16px; margin-bottom: 24px; font-size: 13px; color: #3730A3; line-height: 1.6;
+}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <h1>🏠 회원가입 신청</h1>
+    <p>가입 후 관리자 승인을 받으면<br>가계부를 이용할 수 있어요</p>
+  </div>
+
+  <div class="info-notice">
+    💡 가입 신청 후 <strong>관리자 승인</strong>이 완료되어야<br>가계부에 접근할 수 있습니다.
+  </div>
+
+  <div class="msg-box" id="msg-box"></div>
+
+  <form id="signup-form">
+    <div class="form-group">
+      <label>이름</label>
+      <input type="text" id="name" placeholder="실명을 입력하세요" required>
+    </div>
+    <div class="form-group">
+      <label>아이디</label>
+      <input type="text" id="username" placeholder="영문 또는 숫자 3자 이상" required>
+      <div class="hint">3자 이상 입력해주세요</div>
+    </div>
+    <div class="form-group">
+      <label>비밀번호</label>
+      <input type="password" id="password" placeholder="6자 이상 입력해주세요" required>
+      <div class="hint">6자 이상 입력해주세요</div>
+    </div>
+    <button type="submit" class="btn">가입 신청하기</button>
+  </form>
+
+  <div class="divider">이미 계정이 있으신가요?</div>
+
+  <button class="link-btn" onclick="location.href='/login'">로그인으로 돌아가기</button>
+</div>
+
+<script>
+document.getElementById('signup-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name     = document.getElementById('name').value.trim();
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const msgEl    = document.getElementById('msg-box');
+
+  msgEl.className = 'msg-box';
+
+  const res = await fetch('/api/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, username, password })
+  });
+  const data = await res.json();
+
+  if (data.success) {
+    msgEl.textContent = data.message;
+    msgEl.classList.add('success', 'show');
+    document.getElementById('signup-form').reset();
+    setTimeout(() => location.href = '/login', 3000);
+  } else {
+    msgEl.textContent = data.message;
+    msgEl.classList.add('error', 'show');
+  }
+});
+</script>
+</body>
+</html>

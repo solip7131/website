@@ -1,0 +1,15 @@
+{
+  "name": "household-budget",
+  "version": "1.0.0",
+  "description": "천재쀼 가계부 웹 앱",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "npx nodemon server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3"
+  }
+}

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>접근 거절됨 - 천재쀼 가계부</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Apple SD Gothic Neo', '맑은 고딕', sans-serif;
+  background: linear-gradient(135deg, #1A3FA8 0%, #2D5BE3 50%, #5A8FE8 100%);
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.card {
+  background: white; border-radius: 20px;
+  padding: 48px 40px; width: 100%; max-width: 420px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25); text-align: center;
+}
+.icon { font-size: 56px; margin-bottom: 20px; }
+h1 { font-size: 22px; font-weight: 800; color: #1F2937; margin-bottom: 12px; }
+p { font-size: 14px; color: #6B7280; line-height: 1.7; margin-bottom: 8px; }
+.status-box {
+  background: #FFF0F0; border: 2px solid #FFCCCC; border-radius: 14px;
+  padding: 20px; margin: 24px 0; text-align: left;
+}
+.status-box .title { font-weight: 700; color: #C62828; margin-bottom: 8px; font-size: 14px; }
+.status-box .desc { font-size: 13px; color: #B71C1C; line-height: 1.6; }
+.btn-logout {
+  display: inline-block; margin-top: 16px; padding: 13px 28px;
+  border: 2px solid #E5E7EB; border-radius: 12px;
+  color: #6B7280; font-size: 14px; font-weight: 600;
+  cursor: pointer; text-decoration: none; transition: all .2s;
+  background: white;
+}
+.btn-logout:hover { border-color: #E53935; color: #E53935; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">❌</div>
+  <h1>접근이 거절됐어요</h1>
+  <p id="user-greeting">안녕하세요.</p>
+
+  <div class="status-box">
+    <div class="title">🚫 승인 거절</div>
+    <div class="desc">
+      가입 신청이 관리자에 의해<br>거절되었습니다.<br><br>
+      문의가 필요하시면 관리자에게<br>연락해주세요.
+    </div>
+  </div>
+
+  <a href="/logout" class="btn-logout">로그아웃</a>
+</div>
+
+<script>
+fetch('/api/me').then(r => r.json()).then(user => {
+  if (user.loggedIn) {
+    document.getElementById('user-greeting').textContent = `${user.name}님의 가입 신청이 거절되었습니다.`;
+  }
+});
+</script>
+</body>
+</html>

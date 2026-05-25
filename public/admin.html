@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>관리자 페이지 - 천재쀼 가계부</title>
+<style>
+:root {
+  --blue: #3B72D9; --blue2: #5A8FE8; --blue-light: #E8F0FD;
+  --green: #27AE60; --green-light: #E9F7EF;
+  --red: #E53935; --red-light: #FFEBEE;
+  --orange: #F57C00; --orange-light: #FFF3E0;
+  --gray: #6B7280; --gray-light: #F3F4F6; --border: #E5E7EB;
+  --shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --radius: 14px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Apple SD Gothic Neo', '맑은 고딕', sans-serif; background: #F0F4FA; color: #1F2937; font-size: 14px; }
+
+header {
+  background: linear-gradient(135deg, #1A3FA8 0%, #2D5BE3 100%);
+  color: white; padding: 0 28px;
+  display: flex; align-items: center; justify-content: space-between;
+  box-shadow: 0 4px 20px rgba(45,91,227,0.4);
+  position: sticky; top: 0; z-index: 100; height: 60px;
+}
+header h1 { font-size: 18px; font-weight: 700; }
+.header-right { display: flex; align-items: center; gap: 14px; }
+.header-right span { font-size: 13px; opacity: 0.85; }
+.btn-logout {
+  background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
+  color: white; padding: 6px 14px; border-radius: 8px; cursor: pointer;
+  font-size: 12px; font-weight: 600; transition: all .2s; text-decoration: none;
+}
+.btn-logout:hover { background: rgba(255,255,255,0.28); }
+
+.content { max-width: 900px; margin: 0 auto; padding: 32px 18px; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
+@media (max-width: 600px) { .stats-grid { grid-template-columns: 1fr; } }
+.stat-card {
+  background: white; border-radius: var(--radius); padding: 22px 20px;
+  box-shadow: var(--shadow); text-align: center;
+}
+.stat-card .num { font-size: 32px; font-weight: 800; margin-bottom: 6px; }
+.stat-card .label { font-size: 13px; color: var(--gray); font-weight: 500; }
+.stat-card.pending .num  { color: var(--orange); }
+.stat-card.approved .num { color: var(--green); }
+.stat-card.rejected .num { color: var(--red); }
+
+.tabs { display: flex; gap: 0; background: white; border-radius: 12px; padding: 6px; box-shadow: var(--shadow); margin-bottom: 20px; }
+.tab-btn {
+  flex: 1; padding: 10px; border: none; background: none; border-radius: 8px;
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: all .2s; color: var(--gray);
+}
+.tab-btn.active { background: linear-gradient(135deg, var(--blue), var(--blue2)); color: white; box-shadow: 0 2px 8px rgba(59,114,217,0.3); }
+.tab-btn:hover:not(.active) { background: var(--gray-light); color: #374151; }
+
+.user-list { display: flex; flex-direction: column; gap: 12px; }
+.user-card {
+  background: white; border-radius: var(--radius); padding: 18px 20px;
+  box-shadow: var(--shadow); display: flex; align-items: center; gap: 16px;
+  transition: box-shadow .2s;
+}
+.user-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.12); }
+.avatar {
+  width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, var(--blue), var(--blue2));
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-size: 18px; font-weight: 700; flex-shrink: 0;
+}
+.user-info { flex: 1; }
+.user-info .name { font-size: 15px; font-weight: 700; color: #1F2937; }
+.user-info .username { font-size: 12px; color: var(--gray); margin-top: 2px; }
+.user-info .date { font-size: 11px; color: #9CA3AF; margin-top: 3px; }
+.status-badge {
+  padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700;
+}
+.status-badge.pending  { background: var(--orange-light); color: var(--orange); }
+.status-badge.approved { background: var(--green-light); color: var(--green); }
+.status-badge.rejected { background: var(--red-light); color: var(--red); }
+.actions { display: flex; gap: 8px; flex-shrink: 0; }
+.btn-approve {
+  padding: 8px 16px; border: none; border-radius: 8px;
+  background: linear-gradient(135deg, var(--green), #2ECC71);
+  color: white; font-size: 12px; font-weight: 700; cursor: pointer; transition: all .2s;
+}
+.btn-approve:hover { box-shadow: 0 4px 12px rgba(39,174,96,0.4); transform: translateY(-1px); }
+.btn-reject {
+  padding: 8px 16px; border: none; border-radius: 8px;
+  background: linear-gradient(135deg, var(--red), #EF5350);
+  color: white; font-size: 12px; font-weight: 700; cursor: pointer; transition: all .2s;
+}
+.btn-reject:hover { box-shadow: 0 4px 12px rgba(229,57,53,0.4); transform: translateY(-1px); }
+.btn-delete {
+  padding: 8px 14px; border: 1.5px solid var(--border); border-radius: 8px;
+  background: white; color: var(--gray); font-size: 12px; font-weight: 600; cursor: pointer; transition: all .2s;
+}
+.btn-delete:hover { border-color: var(--red); color: var(--red); background: var(--red-light); }
+
+.empty-state {
+  text-align: center; padding: 48px 20px; color: var(--gray);
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.empty-state .emoji { font-size: 44px; margin-bottom: 12px; }
+.empty-state p { font-size: 14px; }
+
+.toast {
+  position: fixed; bottom: 28px; right: 28px; background: #1F2937;
+  color: white; padding: 13px 22px; border-radius: 10px; font-size: 13px;
+  font-weight: 500; opacity: 0; transition: all .3s; pointer-events: none; z-index: 9999; transform: translateY(8px);
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🔑 관리자 페이지</h1>
+  <div class="header-right">
+    <span>관리자</span>
+    <a href="/logout" class="btn-logout">로그아웃</a>
+  </div>
+</header>
+
+<div class="content">
+  <div class="stats-grid">
+    <div class="stat-card pending">
+      <div class="num" id="stat-pending">—</div>
+      <div class="label">⏳ 승인 대기</div>
+    </div>
+    <div class="stat-card approved">
+      <div class="num" id="stat-approved">—</div>
+      <div class="label">✅ 승인됨</div>
+    </div>
+    <div class="stat-card rejected">
+      <div class="num" id="stat-rejected">—</div>
+      <div class="label">❌ 거절됨</div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('pending',this)">⏳ 대기 중</button>
+    <button class="tab-btn" onclick="switchTab('approved',this)">✅ 승인됨</button>
+    <button class="tab-btn" onclick="switchTab('rejected',this)">❌ 거절됨</button>
+  </div>
+
+  <div id="user-list" class="user-list"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let allUsers = [];
+let currentTab = 'pending';
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+function formatDate(str) {
+  const d = new Date(str);
+  return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+async function loadUsers() {
+  const res = await fetch('/api/admin/users');
+  allUsers = await res.json();
+  updateStats();
+  renderTab(currentTab);
+}
+
+function updateStats() {
+  document.getElementById('stat-pending').textContent  = allUsers.filter(u => u.status === 'pending').length;
+  document.getElementById('stat-approved').textContent = allUsers.filter(u => u.status === 'approved').length;
+  document.getElementById('stat-rejected').textContent = allUsers.filter(u => u.status === 'rejected').length;
+}
+
+function switchTab(tab, btn) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTab(tab);
+}
+
+function renderTab(tab) {
+  const filtered = allUsers.filter(u => u.status === tab);
+  const list = document.getElementById('user-list');
+
+  if (!filtered.length) {
+    const labels = { pending: '대기 중인 가입 신청', approved: '승인된 사용자', rejected: '거절된 신청' };
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="emoji">${tab === 'pending' ? '🕵️' : tab === 'approved' ? '👥' : '📭'}</div>
+        <p>${labels[tab]}이 없어요</p>
+      </div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(user => `
+    <div class="user-card" id="user-${user.id}">
+      <div class="avatar">${user.name[0]}</div>
+      <div class="user-info">
+        <div class="name">${user.name}</div>
+        <div class="username">@${user.username}</div>
+        <div class="date">가입 신청: ${formatDate(user.created_at)}</div>
+      </div>
+      <span class="status-badge ${user.status}">${
+        { pending: '대기 중', approved: '승인됨', rejected: '거절됨' }[user.status]
+      }</span>
+      <div class="actions">
+        ${tab === 'pending' ? `
+          <button class="btn-approve" onclick="approveUser(${user.id})">✅ 승인</button>
+          <button class="btn-reject"  onclick="rejectUser(${user.id})">❌ 거절</button>
+        ` : tab === 'rejected' ? `
+          <button class="btn-approve" onclick="approveUser(${user.id})">✅ 승인</button>
+        ` : tab === 'approved' ? `
+          <button class="btn-reject" onclick="rejectUser(${user.id})">❌ 승인 취소</button>
+        ` : ''}
+        <button class="btn-delete" onclick="deleteUser(${user.id}, '${user.name}')">🗑️</button>
+      </div>
+    </div>`).join('');
+}
+
+async function approveUser(id) {
+  const res = await fetch(`/api/admin/users/${id}/approve`, { method: 'POST' });
+  if ((await res.json()).success) {
+    const user = allUsers.find(u => u.id === id);
+    if (user) { user.status = 'approved'; updateStats(); renderTab(currentTab); }
+    showToast('✅ 승인했어요!');
+  }
+}
+
+async function rejectUser(id) {
+  const res = await fetch(`/api/admin/users/${id}/reject`, { method: 'POST' });
+  if ((await res.json()).success) {
+    const user = allUsers.find(u => u.id === id);
+    if (user) { user.status = 'rejected'; updateStats(); renderTab(currentTab); }
+    showToast('❌ 거절했어요');
+  }
+}
+
+async function deleteUser(id, name) {
+  if (!confirm(`"${name}" 계정을 완전히 삭제할까요?`)) return;
+  const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+  if ((await res.json()).success) {
+    allUsers = allUsers.filter(u => u.id !== id);
+    updateStats(); renderTab(currentTab);
+    showToast('🗑️ 삭제됐어요');
+  }
+}
+
+loadUsers();
+</script>
+</body>
+</html>

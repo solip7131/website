@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>승인 대기 중 - 천재쀼 가계부</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Apple SD Gothic Neo', '맑은 고딕', sans-serif;
+  background: linear-gradient(135deg, #1A3FA8 0%, #2D5BE3 50%, #5A8FE8 100%);
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.card {
+  background: white; border-radius: 20px;
+  padding: 48px 40px; width: 100%; max-width: 420px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25); text-align: center;
+}
+.icon { font-size: 56px; margin-bottom: 20px; }
+h1 { font-size: 22px; font-weight: 800; color: #1F2937; margin-bottom: 12px; }
+p { font-size: 14px; color: #6B7280; line-height: 1.7; margin-bottom: 8px; }
+.status-box {
+  background: #FFF3E0; border: 2px solid #FFB74D; border-radius: 14px;
+  padding: 20px; margin: 24px 0; text-align: left;
+}
+.status-box .title { font-weight: 700; color: #E65100; margin-bottom: 8px; font-size: 14px; }
+.status-box .desc { font-size: 13px; color: #BF360C; line-height: 1.6; }
+.user-info { font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 4px; }
+.btn {
+  display: inline-block; padding: 13px 28px; border: none; border-radius: 12px;
+  background: linear-gradient(135deg, #2D5BE3, #5A8FE8);
+  color: white; font-size: 14px; font-weight: 700;
+  cursor: pointer; transition: all 0.2s; text-decoration: none; margin-top: 8px;
+}
+.btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(45,91,227,0.4); }
+.btn-logout {
+  display: inline-block; margin-top: 12px; padding: 11px 24px;
+  border: 2px solid #E5E7EB; border-radius: 12px;
+  color: #6B7280; font-size: 13px; font-weight: 600;
+  cursor: pointer; text-decoration: none; transition: all .2s;
+  background: white;
+}
+.btn-logout:hover { border-color: #E53935; color: #E53935; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">⏳</div>
+  <h1>승인 대기 중이에요</h1>
+  <p id="user-greeting">안녕하세요!</p>
+
+  <div class="status-box">
+    <div class="title">🔐 관리자 승인 필요</div>
+    <div class="desc">
+      가입 신청이 접수됐어요.<br>
+      관리자가 확인 후 승인하면<br>
+      가계부에 접근할 수 있어요.
+    </div>
+  </div>
+
+  <p>승인 후 다시 로그인해주세요.</p>
+  <br>
+  <a href="/login" class="btn">로그인 페이지로</a>
+  <br>
+  <a href="/logout" class="btn-logout">로그아웃</a>
+</div>
+
+<script>
+fetch('/api/me').then(r => r.json()).then(user => {
+  if (user.loggedIn) {
+    document.getElementById('user-greeting').textContent = `${user.name}님, 가입 신청을 해주셔서 감사해요!`;
+  }
+});
+</script>
+</body>
+</html>
