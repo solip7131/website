@@ -97,6 +97,17 @@ async function initDB() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notices (
+      id         SERIAL PRIMARY KEY,
+      title      TEXT NOT NULL,
+      content    TEXT NOT NULL,
+      author_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
   // admin 계정이 없으면 생성
   const { rows: adminRows } = await pool.query(
     "SELECT id FROM users WHERE username = 'admin' LIMIT 1"
@@ -194,6 +205,15 @@ async function requireAdmin(req, res, next) {
     if (!req.session.userId) return res.redirect('/login');
     const user = await getUser(req.session.userId);
     if (!user || user.role !== 'admin') return res.redirect('/');
+    next();
+  } catch (err) { next(err); }
+}
+
+async function requireAdminApi(req, res, next) {
+  try {
+    if (!req.session.userId) return res.status(401).json({ error: 'unauthorized' });
+    const user = await getUser(req.session.userId);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
     next();
   } catch (err) { next(err); }
 }
@@ -394,6 +414,51 @@ app.put('/api/fixed', requireApproved, async (req, res, next) => {
       client.release();
     }
     broadcastUpdate();
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// ─────────────────────────────────────────
+// 공지사항 API
+// ─────────────────────────────────────────
+app.get('/api/notices', requireApproved, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT n.id, n.title, n.content, n.created_at, n.updated_at, u.name AS author_name
+       FROM notices n LEFT JOIN users u ON n.author_id = u.id
+       ORDER BY n.created_at DESC`
+    );
+    res.json(rows);
+  } catch (err) { next(err); }
+});
+
+app.post('/api/notices', requireAdminApi, async (req, res, next) => {
+  try {
+    const { title, content } = req.body;
+    if (!title || !content) return res.json({ success: false, message: '제목과 내용을 입력해주세요.' });
+    const { rows } = await pool.query(
+      'INSERT INTO notices (title, content, author_id) VALUES ($1,$2,$3) RETURNING *',
+      [title, content, req.session.userId]
+    );
+    res.json({ success: true, notice: rows[0] });
+  } catch (err) { next(err); }
+});
+
+app.put('/api/notices/:id', requireAdminApi, async (req, res, next) => {
+  try {
+    const { title, content } = req.body;
+    if (!title || !content) return res.json({ success: false, message: '제목과 내용을 입력해주세요.' });
+    await pool.query(
+      'UPDATE notices SET title=$1, content=$2, updated_at=NOW() WHERE id=$3',
+      [title, content, req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+app.delete('/api/notices/:id', requireAdminApi, async (req, res, next) => {
+  try {
+    await pool.query('DELETE FROM notices WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (err) { next(err); }
 });

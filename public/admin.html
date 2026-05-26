@@ -110,6 +110,57 @@ header h1 { font-size: 18px; font-weight: 700; }
   font-weight: 500; opacity: 0; transition: all .3s; pointer-events: none; z-index: 9999; transform: translateY(8px);
 }
 .toast.show { opacity: 1; transform: translateY(0); }
+
+/* ── 공지사항 관리 ── */
+.notice-form {
+  background: #F8FAFF; border: 1.5px solid var(--border);
+  border-radius: var(--radius); padding: 22px; margin-bottom: 24px;
+}
+.notice-form h3 { font-size: 14px; font-weight: 700; margin-bottom: 14px; color: #374151; }
+.notice-form input, .notice-form textarea {
+  width: 100%; border: 1.5px solid var(--border); border-radius: 10px;
+  padding: 10px 14px; font-size: 13px; font-family: inherit; outline: none;
+  transition: border .2s, box-shadow .2s; background: white; margin-bottom: 10px;
+}
+.notice-form input:focus, .notice-form textarea:focus {
+  border-color: var(--blue2); box-shadow: 0 0 0 3px rgba(90,143,232,0.15);
+}
+.notice-form textarea { min-height: 100px; resize: vertical; }
+.notice-card {
+  background: white; border-radius: var(--radius); padding: 18px 20px;
+  box-shadow: var(--shadow); margin-bottom: 12px; transition: box-shadow .2s;
+}
+.notice-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.12); }
+.notice-card-title { font-size: 15px; font-weight: 700; color: #1F2937; margin-bottom: 6px; }
+.notice-card-content {
+  font-size: 13px; color: #4B5563; line-height: 1.7;
+  white-space: pre-wrap; word-break: break-word;
+  background: var(--gray-light); border-radius: 8px; padding: 10px 14px; margin-bottom: 10px;
+}
+.notice-card-meta { font-size: 11px; color: var(--gray); margin-bottom: 12px; }
+.notice-card .actions { display: flex; gap: 8px; }
+.btn-edit-notice {
+  padding: 7px 16px; border: none; border-radius: 8px;
+  background: linear-gradient(135deg, var(--blue), var(--blue2));
+  color: white; font-size: 12px; font-weight: 700; cursor: pointer; transition: all .2s;
+}
+.btn-edit-notice:hover { box-shadow: 0 4px 12px rgba(59,114,217,0.4); transform: translateY(-1px); }
+.btn-del-notice {
+  padding: 7px 14px; border: 1.5px solid var(--border); border-radius: 8px;
+  background: white; color: var(--gray); font-size: 12px; font-weight: 600; cursor: pointer; transition: all .2s;
+}
+.btn-del-notice:hover { border-color: var(--red); color: var(--red); background: var(--red-light); }
+.btn-submit-notice {
+  padding: 11px 26px; border: none; border-radius: 10px; cursor: pointer;
+  background: linear-gradient(135deg, var(--blue), var(--blue2));
+  color: white; font-size: 13px; font-weight: 700; transition: all .2s;
+}
+.btn-submit-notice:hover { box-shadow: 0 4px 12px rgba(59,114,217,0.35); transform: translateY(-1px); }
+.btn-cancel-edit {
+  padding: 11px 20px; border: 1.5px solid var(--border); border-radius: 10px; cursor: pointer;
+  background: white; color: var(--gray); font-size: 13px; font-weight: 600; transition: all .2s;
+}
+.btn-cancel-edit:hover { background: var(--gray-light); }
 </style>
 </head>
 <body>
@@ -142,9 +193,25 @@ header h1 { font-size: 18px; font-weight: 700; }
     <button class="tab-btn active" onclick="switchTab('pending',this)">⏳ 대기 중</button>
     <button class="tab-btn" onclick="switchTab('approved',this)">✅ 승인됨</button>
     <button class="tab-btn" onclick="switchTab('rejected',this)">❌ 거절됨</button>
+    <button class="tab-btn" onclick="switchTab('notices',this)">📢 공지사항</button>
   </div>
 
   <div id="user-list" class="user-list"></div>
+
+  <!-- 공지사항 관리 패널 -->
+  <div id="notice-panel" style="display:none;">
+    <div class="notice-form">
+      <h3 id="notice-form-title">📝 새 공지사항 작성</h3>
+      <input type="hidden" id="notice-edit-id">
+      <input type="text" id="notice-title-input" placeholder="제목을 입력하세요">
+      <textarea id="notice-content-input" placeholder="내용을 입력하세요 (규칙, 안내 등)"></textarea>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn-cancel-edit" id="notice-cancel-btn" style="display:none;" onclick="cancelEditNotice()">취소</button>
+        <button class="btn-submit-notice" onclick="submitNotice()">등록</button>
+      </div>
+    </div>
+    <div id="notice-list"></div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -152,6 +219,7 @@ header h1 { font-size: 18px; font-weight: 700; }
 <script>
 let allUsers = [];
 let currentTab = 'pending';
+let allNotices = [];
 
 function showToast(msg) {
   const t = document.getElementById('toast');
@@ -181,7 +249,19 @@ function switchTab(tab, btn) {
   currentTab = tab;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  renderTab(tab);
+
+  const noticePanel = document.getElementById('notice-panel');
+  const userList    = document.getElementById('user-list');
+
+  if (tab === 'notices') {
+    userList.style.display   = 'none';
+    noticePanel.style.display = 'block';
+    loadNotices();
+  } else {
+    userList.style.display   = '';
+    noticePanel.style.display = 'none';
+    renderTab(tab);
+  }
 }
 
 function renderTab(tab) {
@@ -252,6 +332,99 @@ async function deleteUser(id, name) {
 }
 
 loadUsers();
+
+// ════════════════════════════════════════
+// 공지사항 관리
+// ════════════════════════════════════════
+function fmtDate(str) {
+  const d = new Date(str);
+  return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadNotices() {
+  const res = await fetch('/api/notices');
+  allNotices = await res.json();
+  renderNotices();
+}
+
+function renderNotices() {
+  const list = document.getElementById('notice-list');
+  if (!allNotices.length) {
+    list.innerHTML = '<div class="empty-state"><div class="emoji">📭</div><p>등록된 공지사항이 없어요</p></div>';
+    return;
+  }
+  list.innerHTML = allNotices.map(n => `
+    <div class="notice-card" id="nc-${n.id}">
+      <div class="notice-card-title">${escHtml(n.title)}</div>
+      <div class="notice-card-meta">📅 ${fmtDate(n.created_at)}${n.updated_at !== n.created_at ? ' · 수정됨 ' + fmtDate(n.updated_at) : ''}</div>
+      <div class="notice-card-content">${escHtml(n.content)}</div>
+      <div class="actions">
+        <button class="btn-edit-notice" onclick="startEditNotice(${n.id})">✏️ 수정</button>
+        <button class="btn-del-notice"  onclick="deleteNotice(${n.id})">🗑️ 삭제</button>
+      </div>
+    </div>`).join('');
+}
+
+function startEditNotice(id) {
+  const n = allNotices.find(x => x.id === id);
+  if (!n) return;
+  document.getElementById('notice-edit-id').value       = id;
+  document.getElementById('notice-title-input').value   = n.title;
+  document.getElementById('notice-content-input').value = n.content;
+  document.getElementById('notice-form-title').textContent = '✏️ 공지사항 수정';
+  document.getElementById('notice-cancel-btn').style.display = '';
+  document.querySelector('.btn-submit-notice').textContent = '저장';
+  document.getElementById('notice-title-input').focus();
+  document.getElementById('notice-panel').scrollTop = 0;
+  window.scrollTo({ top: document.getElementById('notice-panel').offsetTop - 80, behavior: 'smooth' });
+}
+
+function cancelEditNotice() {
+  document.getElementById('notice-edit-id').value        = '';
+  document.getElementById('notice-title-input').value    = '';
+  document.getElementById('notice-content-input').value  = '';
+  document.getElementById('notice-form-title').textContent = '📝 새 공지사항 작성';
+  document.getElementById('notice-cancel-btn').style.display = 'none';
+  document.querySelector('.btn-submit-notice').textContent = '등록';
+}
+
+async function submitNotice() {
+  const id      = document.getElementById('notice-edit-id').value;
+  const title   = document.getElementById('notice-title-input').value.trim();
+  const content = document.getElementById('notice-content-input').value.trim();
+  if (!title || !content) { showToast('⚠️ 제목과 내용을 모두 입력해주세요'); return; }
+
+  const url    = id ? `/api/notices/${id}` : '/api/notices';
+  const method = id ? 'PUT' : 'POST';
+  const res    = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, content })
+  });
+  const data = await res.json();
+  if (data.success) {
+    showToast(id ? '✅ 공지사항이 수정됐어요' : '✅ 공지사항이 등록됐어요');
+    cancelEditNotice();
+    await loadNotices();
+  } else {
+    showToast('❌ ' + (data.message || '오류가 발생했어요'));
+  }
+}
+
+async function deleteNotice(id) {
+  if (!confirm('이 공지사항을 삭제할까요?')) return;
+  const res  = await fetch(`/api/notices/${id}`, { method: 'DELETE' });
+  const data = await res.json();
+  if (data.success) {
+    allNotices = allNotices.filter(n => n.id !== id);
+    renderNotices();
+    showToast('🗑️ 삭제됐어요');
+  }
+}
 </script>
 </body>
 </html>

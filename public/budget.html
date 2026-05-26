@@ -225,6 +225,51 @@ input.inline-edit { border: 1.5px solid var(--blue2); border-radius: 6px; paddin
 .empty-state .emoji { font-size: 40px; margin-bottom: 10px; }
 .empty-state p { font-size: 14px; }
 
+/* ── 공지사항 게시판 ── */
+.notice-board {
+  max-width: 1180px; margin: 16px auto 0; padding: 0 18px;
+}
+.notice-board-inner {
+  background: white; border-radius: var(--radius);
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.notice-board-header {
+  background: linear-gradient(135deg, #1A3FA8 0%, #2D5BE3 100%);
+  color: white; padding: 12px 20px;
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; user-select: none;
+}
+.notice-board-header .notice-title { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.notice-board-header .notice-count {
+  background: rgba(255,255,255,0.25); border-radius: 12px;
+  padding: 2px 10px; font-size: 12px; font-weight: 600;
+}
+.notice-toggle-icon { font-size: 12px; transition: transform .25s; }
+.notice-toggle-icon.open { transform: rotate(180deg); }
+.notice-body { max-height: 0; overflow: hidden; transition: max-height .3s ease; }
+.notice-body.open { max-height: 600px; overflow-y: auto; }
+.notice-item {
+  padding: 13px 20px; border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: background .15s;
+}
+.notice-item:last-child { border-bottom: none; }
+.notice-item:hover { background: #FAFBFF; }
+.notice-item-header { display: flex; align-items: center; gap: 10px; margin-bottom: 0; }
+.notice-item-title { font-size: 13px; font-weight: 600; color: #1F2937; flex: 1; }
+.notice-item-meta { font-size: 11px; color: var(--gray); flex-shrink: 0; }
+.notice-item-content {
+  display: none; margin-top: 9px;
+  font-size: 13px; color: #374151; line-height: 1.7;
+  background: var(--blue-light); border-radius: 8px;
+  padding: 10px 14px; white-space: pre-wrap; word-break: break-word;
+}
+.notice-item-content.show { display: block; }
+.notice-empty { padding: 22px; text-align: center; color: var(--gray); font-size: 13px; }
+.notice-new-badge {
+  background: var(--red); color: white;
+  border-radius: 10px; padding: 1px 7px; font-size: 10px; font-weight: 700;
+}
+
 /* ── 신용카드 가져오기 ── */
 .cc-drop-zone {
   border: 2px dashed var(--border); border-radius: 10px;
@@ -266,6 +311,23 @@ input.inline-edit { border: 1.5px solid var(--blue2); border-radius: 6px; paddin
   <button onclick="showTab('fixed',this)">📌 고정지출</button>
   <button onclick="showTab('summary',this)">📈 월별요약</button>
 </nav>
+
+<!-- ══ 공지사항 게시판 ══ -->
+<div class="notice-board">
+  <div class="notice-board-inner">
+    <div class="notice-board-header" onclick="toggleNoticeBoard()">
+      <div class="notice-title">
+        <span>📢</span>
+        <span>공지사항 / 규칙</span>
+        <span class="notice-count" id="notice-count">0</span>
+      </div>
+      <span class="notice-toggle-icon open" id="notice-toggle-icon">▲</span>
+    </div>
+    <div class="notice-body open" id="notice-body">
+      <div class="notice-empty" id="notice-loading">불러오는 중...</div>
+    </div>
+  </div>
+</div>
 
 <div class="content">
 
@@ -1408,7 +1470,65 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadData();
   renderAll();
   setupSSE();
+  await loadNotices();
 });
+
+// ════════════════════════════════════════
+// 공지사항 게시판
+// ════════════════════════════════════════
+let noticeOpen = true;
+
+function toggleNoticeBoard() {
+  noticeOpen = !noticeOpen;
+  const body = document.getElementById('notice-body');
+  const icon = document.getElementById('notice-toggle-icon');
+  body.classList.toggle('open', noticeOpen);
+  icon.classList.toggle('open', noticeOpen);
+}
+
+function toggleNoticeItem(id) {
+  const el = document.getElementById(`notice-content-${id}`);
+  if (el) el.classList.toggle('show');
+}
+
+function isNewNotice(createdAt) {
+  return (Date.now() - new Date(createdAt).getTime()) < 3 * 24 * 60 * 60 * 1000;
+}
+
+function fmtNoticeDate(str) {
+  const d = new Date(str);
+  return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
+}
+
+async function loadNotices() {
+  try {
+    const res = await fetch('/api/notices');
+    const notices = await res.json();
+    const body = document.getElementById('notice-body');
+    const countEl = document.getElementById('notice-count');
+    countEl.textContent = notices.length;
+
+    if (!notices.length) {
+      body.innerHTML = '<div class="notice-empty">등록된 공지사항이 없어요</div>';
+      return;
+    }
+
+    body.innerHTML = notices.map(n => `
+      <div class="notice-item" onclick="toggleNoticeItem(${n.id})">
+        <div class="notice-item-header">
+          <span class="notice-item-title">${escapeHtml(n.title)}${isNewNotice(n.created_at) ? ' <span class="notice-new-badge">NEW</span>' : ''}</span>
+          <span class="notice-item-meta">${fmtNoticeDate(n.created_at)} · ${escapeHtml(n.author_name || '관리자')}</span>
+        </div>
+        <div class="notice-item-content" id="notice-content-${n.id}">${escapeHtml(n.content)}</div>
+      </div>`).join('');
+  } catch (e) {
+    document.getElementById('notice-body').innerHTML = '<div class="notice-empty">공지사항을 불러오지 못했어요</div>';
+  }
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 </script>
 </body>
 </html>
